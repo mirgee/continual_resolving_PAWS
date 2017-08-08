@@ -22,6 +22,7 @@ Graph: distance, animal density, grid_x, grid_y
 """
 from itertools import product
 from random import sample
+import os
 import networkx as nx
 import numpy as np
 import pandas as pd
@@ -37,16 +38,20 @@ base = 0
 
 def init():
 	# TODO: Add edge attributes
-	df = pd.read_csv("/home/miroslav/Source/research_task/paws_mdp_out.txt")
-	global dist = pd.read_csv("/home/miroslav/Source/research_task/dist.gop")
-	global graph = nx.from_pandas_dataframe(df, edge_attr=['distance', 'animal_density', 'grid_cell_x', 'grid_cell_y'])
-	global sigma1 = [[(1/(grid_dim_x*grid_dim_y), 1/(grid_dim_x*grid_dim_y))] * grid_dim_y] * grid_dim_x
-	global accum_strat1 = [[(1/(grid_dim_x*grid_dim_y), 1/(grid_dim_x*grid_dim_y))] * grid_dim_y] * grid_dim_x
+	df = pd.read_csv("/home/miroslav/Source/research_task/paws_mdp_out.txt", sep=" ")
+	global dist
+	dist = pd.read_csv("/home/miroslav/Source/research_task/dist.gop", sep=" ")
+	global graph
+	graph = nx.from_pandas_dataframe(df, source='node_from', target='node_to', edge_attr=['distance', 'animal_density', 'grid_cell_x', 'grid_cell_y', 'sigma', 'regret', 'accum_strat'])
+	global sigma1
+	sigma1 = [[(1/(grid_dim_x*grid_dim_y), 1/(grid_dim_x*grid_dim_y))] * grid_dim_y] * grid_dim_x
+	global accum_strat1
+	accum_strat1 = [[(1/(grid_dim_x*grid_dim_y), 1/(grid_dim_x*grid_dim_y))] * grid_dim_y] * grid_dim_x
 	# global sigma2 = {} # (node, edge) -> probability, has to be initialized!!! HOW???
 	# global accum_strat2 = {} # (node, edge) -> probability
-	global regret1 = [[0] * grid_dim_y] * grid_dim_x
+	global regret1
+	regret1 = [[0] * grid_dim_y] * grid_dim_x
 	# global regret2 = {} # (node, edge) -> probability
-	global route = []
 	return graph, dist
 
 def cfr_player1():
@@ -57,9 +62,9 @@ def cfr_player1():
 		accum_val = 0
 
 		# for (grid_x, grid_y) in sample(product(range(len(grid_dim_x)), range(len(grid_dim_y))), att_resources):
-		for (grid_x, grid_y) in product(range(len(grid_dim_x)), range(len(grid_dim_y))):
+		for (grid_x, grid_y) in product(range(grid_dim_x), range(grid_dim_y)):
 			# -cfv1 = cfv2 ?
-			route = cfr_player2(base, grid_x, grid_y, sigma1[grid_x][grid_y] * p1, p2, route_length, 0)
+			route = cfr_player2(base, grid_x, grid_y, sigma1[grid_x][grid_y] * p1, p2, [], route_length)
 			cf_values1[grid_x][grid_y] = -compute_value_from_route(route, grid_x, grid_y)
 			accum_val += sigma1[grid_x][grid_y] * cf_values1[grid_x][grid_y]
 
@@ -71,7 +76,7 @@ def cfr_player1():
 	return route
 
 def cfr_player2(curr_node, grid_x, grid_y, p1, p2, route, rem_dist):
-	if rem_dist <= dist[curr_node][base]:
+	if rem_dist <= dist.iloc[curr_node, base]:
 		return route
 
 	edges = graph.edges(curr_node)
@@ -79,18 +84,20 @@ def cfr_player2(curr_node, grid_x, grid_y, p1, p2, route, rem_dist):
 
 	for edge_index, edge in enumerate(edges):
 		# cf_values2[edge_index], route = cfr_player2(edge[1], grid_x, grid_y, p1, edge.sigma * p2, rem_dist - edge.distance, route, depth+1)
-		cf_values2[edge_index] = values(edge[1], grid_x, grid_y, p1, edge.sigma * p2, 0, rem_dist - edge.distance)
+		edge_data = graph[edge[0]][edge[1]]
+		cf_values2[edge_index] = values(edge[1], grid_x, grid_y, p1, edge_data['sigma'] * p2, 0, rem_dist - edge_data['distance'])
 
 	regret_matching2(curr_node)
 
-	best_edge = np.argmax(edges.sigma)
+	best_edge = argmax_attr(edges, 'sigma')
 	route.append(best_edge)
 
-	return cfr_player2(best_edge[1], grid_x, grid_y, p1, best_edge.sigma * p2, route, rem_dist - dist[curr_node][best_edge[1]])
+	return cfr_player2(best_edge[1], grid_x, grid_y, p1, graph[best_edge[0]][best_edge[1]]['sigma'] * p2, route, rem_dist - dist.iloc[curr_node, best_edge[1]])
 
 
 def values(curr_node, grid_x, grid_y, p1, p2, depth, rem_dist):
-	if depth > max_depth or dist[curr_node][base] <= rem_dist:
+	if depth > max_depth or dist.iloc[curr_node, base] <= rem_dist:
+		# TODO: Problem: we can't modify rem_dist without recompiling the program again
 		return heuristic(curr_node, grid_x, grid_y, rem_dist)
 
 	accum_val = 0
@@ -98,12 +105,13 @@ def values(curr_node, grid_x, grid_y, p1, p2, depth, rem_dist):
 	edges = graph.edges(curr_node)
 	values = [0] * len(edges)
 	for edge_index, edge in enumerate(edges):
-		values[edge_index] = values(edge[1], grid_x, grid_y, edge.sigma * p2, depth+1, rem_dist - edge.distance)
+		edge_data = graph[edge[0]][edge[1]]
+		values[edge_index] = values(edge[1], grid_x, grid_y, edge_data['sigma'] * p2, depth+1, rem_dist - edge_data['distance'])
 
-		accum_val += edge.sigma * values[edge_index]
+		accum_val += edge_data['sigma'] * values[edge_index]
 
-		edge.regret += p1 * (values[edge_index] - accum_val)
-		edge.accum_strat += p2 * edge.sigma
+		edge_data['regret'] += p1 * (values[edge_index] - accum_val)
+		edge_data['accum_strat'] += p2 * edge_data['sigma']
 
 	return accum_val
 
@@ -141,8 +149,23 @@ def regret_matching2(curr_node):
 		for edge in edges:
 			edge.sigma = 1/len(edges)
 
+def argmax_attr(edges, attr):
+	max_val = -9999
+	max_index = (None, None)
+	for edge in edges:
+		val = graph[edge[0]][edge[1]][attr]
+		if val > max_val:
+			max_val = val
+			max_index = edge
+	return edge
+
 def heuristic():
-	pass
+	os.system('mpirun -n 2 python2.7 ./loader.py op dist.gop 1 1 logfile')
+	with open('logfile') as f:
+		content = f.readlines()
+	content = [x.strip() for x in content]
+	return content[-1].split()[0]
 
 
 init()
+print(cfr_player1())
