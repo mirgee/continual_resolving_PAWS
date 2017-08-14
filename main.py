@@ -42,7 +42,8 @@ def init():
 	global dist
 	dist = pd.read_csv("/home/miroslav/Source/research_task/dist.gop", sep=" ")
 	global graph
-	graph = nx.from_pandas_dataframe(df, source='node_from', target='node_to', edge_attr=['distance', 'animal_density', 'grid_cell_x', 'grid_cell_y', 'sigma', 'regret', 'accum_strat'])
+	graph = \
+		nx.from_pandas_dataframe(df, source='node_from', target='node_to', edge_attr=['distance', 'animal_density', 'grid_cell_x', 'grid_cell_y', 'sigma', 'regret', 'accum_strat'])
 	global sigma1
 	sigma1 = [[(1/(grid_dim_x*grid_dim_y), 1/(grid_dim_x*grid_dim_y))] * grid_dim_y] * grid_dim_x
 	global accum_strat1
@@ -53,6 +54,7 @@ def init():
 	regret1 = [[0] * grid_dim_y] * grid_dim_x
 	# global regret2 = {} # (node, edge) -> probability
 	return graph, dist
+
 
 def cfr_player1():
 	p1 = 1
@@ -68,12 +70,13 @@ def cfr_player1():
 			cf_values1[grid_x][grid_y] = -compute_value_from_route(route, grid_x, grid_y)
 			accum_val += sigma1[grid_x][grid_y] * cf_values1[grid_x][grid_y]
 
+		for (grid_x, grid_y) in product(range(grid_dim_x), range(grid_dim_y)):
 			regret1[grid_x][grid_y] += p2 * (cf_values1[grid_x][grid_y] - accum_val)
 			accum_strat1 += p1 * sigma1[grid_x][grid_y]
-
 			regret_matching1()
 
 	return route
+
 
 def cfr_player2(curr_node, grid_x, grid_y, p1, p2, route, rem_dist):
 	if rem_dist <= dist.iloc[curr_node, base]:
@@ -82,10 +85,12 @@ def cfr_player2(curr_node, grid_x, grid_y, p1, p2, route, rem_dist):
 	edges = graph.edges(curr_node)
 	cf_values2 = [0] * len(edges)
 
+	# TODO: Here we should loop T times normalize accum. strategies & construct route from them! Or not?
 	for edge_index, edge in enumerate(edges):
 		# cf_values2[edge_index], route = cfr_player2(edge[1], grid_x, grid_y, p1, edge.sigma * p2, rem_dist - edge.distance, route, depth+1)
 		edge_data = graph[edge[0]][edge[1]]
-		cf_values2[edge_index] = values(edge[1], grid_x, grid_y, p1, edge_data['sigma'] * p2, 0, rem_dist - edge_data['distance'])
+		cf_values2[edge_index] = \
+			values(edge[1], grid_x, grid_y, p1, edge_data['sigma'] * p2, 0, rem_dist - edge_data['distance'])
 
 	regret_matching2(curr_node)
 
@@ -97,11 +102,12 @@ def cfr_player2(curr_node, grid_x, grid_y, p1, p2, route, rem_dist):
 
 def values(curr_node, grid_x, grid_y, p1, p2, depth, rem_dist):
 	if depth > max_depth or dist.iloc[curr_node, base] <= rem_dist:
-		# TODO: Problem: we can't modify rem_dist without recompiling the program again
+		# TODO: Problem: we can't modify rem_dist without recompiling the program again.
 		return heuristic(curr_node, grid_x, grid_y, rem_dist)
 
 	accum_val = 0
 
+	# TODO: Exclude parent node, or mark visited nodes?
 	edges = graph.edges(curr_node)
 	values = [0] * len(edges)
 	for edge_index, edge in enumerate(edges):
@@ -110,7 +116,9 @@ def values(curr_node, grid_x, grid_y, p1, p2, depth, rem_dist):
 
 		accum_val += edge_data['sigma'] * values[edge_index]
 
+	for edge_index, edge in enumerate(edges):
 		edge_data['regret'] += p1 * (values[edge_index] - accum_val)
+		# TODO: Do we need accum_strat? This is what approaches Nash! Or normalized sigmas?
 		edge_data['accum_strat'] += p2 * edge_data['sigma']
 
 	return accum_val
@@ -120,7 +128,7 @@ def compute_value_from_route(route, grid_x, grid_y):
 	for edge in route:
 		# TODO: Compute total a.d. per concerned grid cell
 		total_animal_density = 1
-		ratio =  graph.edges(edge).animal_density / total_animal_density
+		ratio = graph.edges(edge).animal_density / total_animal_density
 		if edge.grid_x == grid_x and edge.grid_y == grid_y:
 			value += ratio * values[edge.grid_x][edge.grid_y]
 		else:
