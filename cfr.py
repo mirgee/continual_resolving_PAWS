@@ -61,19 +61,20 @@ def cfr_player2(node_history, grid_x, grid_y, p1, p2, rem_dist):
 	routes = [[]] * len(edges)
 	cf_value_curr = 0
 	for edge_index, edge in enumerate(edges):
-		edge_data = graph[edge[0]][edge[1]]
-		node_history.append(edge[1])
-		value, route = cfr_player2(node_history, grid_x, grid_y, p1,
-						edge_data['sigma'] * p2, rem_dist - edge_data['distance'])
-		cf_values2[edge_index] = value
-		# I = route_from_edges(edge_history) + route
-		cf_value_curr += edge_data['sigma'] * value
-		routes.append(route)
+		if len(node_history) < 2 or edge[1] != node_history[-2]:
+			edge_data = graph[edge[0]][edge[1]]
+			node_history.append(edge[1])
+			value, route = cfr_player2(node_history, grid_x, grid_y, p1,
+							edge_data['sigma'] * p2, rem_dist - edge_data['distance'])
+			cf_values2[edge_index] = value
+			cf_value_curr += edge_data['sigma'] * value
+			routes.append(route)
 
 	for edge_index, edge in enumerate(edges):
-		edge_data = graph[edge[0]][edge[1]]
-		edge_data['regret'] += p1 * (cf_values2[edge_index] - cf_value_curr)
-		edge_data['avg_strat'] += p2 * edge_data['sigma']
+		if len(node_history) < 2 or edge[1] != node_history[-2]:
+			edge_data = graph[edge[0]][edge[1]]
+			edge_data['regret'] += p1 * (cf_values2[edge_index] - cf_value_curr)
+			edge_data['avg_strat'] += p2 * edge_data['sigma']
 
 	regret_matching2(curr_node)
 
@@ -110,15 +111,15 @@ def regret_matching1():
 
 def regret_matching2(curr_node):
 	edges = graph.edges(curr_node)
-	regret = {}
+	regret = []
 	for edge in edges:
 		edge_data = graph[edge[0]][edge[1]]
-		regret[edge] = max(edge_data['regret'], 0)
-	den = sum(regret.values())
+		regret.append(max(edge_data['regret'], 0))
+	den = sum(regret)
 	if den > 0:
 		for edge_index, edge in enumerate(edges):
 			edge_data = graph[edge[0]][edge[1]]
-			edge_data['sigma'] = edge_data['regret'] / den
+			edge_data['sigma'] = regret[edge_index] / den
 	else:
 		for edge_index, edge in enumerate(edges):
 			edge_data = graph[edge[0]][edge[1]]
