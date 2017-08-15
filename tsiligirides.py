@@ -49,8 +49,8 @@ def tsiligirides(dist, scores):
 	return max_res
 
 
-dist = pd.read_csv("dist.gop", delim_whitespace=True, quoting=csv.QUOTE_NONE, index_col=None, header=0, engine='python', encoding = 'utf-8')
-pred = pd.read_csv("predecessors.txt", delim_whitespace=True, quoting=csv.QUOTE_NONE, index_col=None, header=0, engine='python', encoding = 'utf-8')
+dist = pd.read_csv("data/dist.gop", delim_whitespace=True, quoting=csv.QUOTE_NONE, index_col=None, header=0, engine='python', encoding = 'utf-8')
+pred = pd.read_csv("data/predecessors.txt", delim_whitespace=True, quoting=csv.QUOTE_NONE, index_col=None, header=0, engine='python', encoding = 'utf-8')
 scores = pd.read_csv("scores.csv")
 start = time.time()
 tsiligirides(dist, scores)
