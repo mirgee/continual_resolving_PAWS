@@ -3,17 +3,17 @@ import networkx as nx
 import pandas as pd
 
 max_depth = 4
-T = 10
+T = 20
 grid_dim_x = 1
 grid_dim_y = 2
-base = 0
-route_length = 3
+base = 0.0
+route_length = 5
 
 
 def init():
-	df = pd.read_csv("/home/miroslav/Source/research_task/simple/nodes_list.txt", sep=" ")
+	df = pd.read_csv("simple/nodes_list.txt", sep=" ")
 	global dist
-	dist = pd.read_csv("/home/miroslav/Source/research_task/simple/dist_simple.gop", sep=" ")
+	dist = pd.read_csv("simple/dist_simple.gop", sep=" ")
 	global graph
 	graph = \
 		nx.from_pandas_dataframe(df, source='node_from', target='node_to', edge_attr=['distance', 'animal_density', 'grid_cell_x', 'grid_cell_y', 'sigma', 'regret', 'avg_strat'])
@@ -36,7 +36,7 @@ def cfr_player1():
 		for (grid_x, grid_y) in product(range(grid_dim_x), range(grid_dim_y)):
 			cf_values1[grid_x][grid_y],_ = \
 				cfr_player2([base], grid_x, grid_y, sigma1[grid_x][grid_y] * p1, p2,
-				            route_length)
+				            route_length, [])
 			accum_val += sigma1[grid_x][grid_y] * cf_values1[grid_x][grid_y]
 
 		for (grid_x, grid_y) in product(range(grid_dim_x), range(grid_dim_y)):
@@ -49,34 +49,35 @@ def cfr_player1():
 	return average_strat1
 
 
-def cfr_player2(node_history, grid_x, grid_y, p1, p2, rem_dist):
+def cfr_player2(node_history, grid_x, grid_y, p1, p2, rem_dist, visited):
 	curr_node = node_history[-1]
+	edges = graph.edges(curr_node)
+	edges = [edge for edge in edges if (edge[0], edge[1]) not in visited or (edge[1], edge[0]) not in visited]
 
-	if rem_dist <= dist.iloc[int(curr_node), int(base)] or (len(node_history) > 1 and int(curr_node) == int(base)):
+	if rem_dist <= dist.iloc[int(curr_node), int(base)] or (len(node_history) > 1 and int(curr_node) == int(base))\
+			or len(edges) == 0:
 		# route = route_from_edges(edge_history)
 		return compute_value_from_route(node_history, grid_x, grid_y), node_history
 
-	edges = graph.edges(curr_node)
 	cf_values2 = [0] * len(edges)
 	routes = [[]] * len(edges)
 	cf_value_curr = 0
 	for edge_index, edge in enumerate(edges):
-		if len(node_history) < 2 or edge[1] != node_history[-2]:
-			edge_data = graph[edge[0]][edge[1]]
-			node_history.append(edge[1])
-			value, route = cfr_player2(node_history, grid_x, grid_y, p1,
-							edge_data['sigma'] * p2, rem_dist - edge_data['distance'])
-			cf_values2[edge_index] = value
-			cf_value_curr += edge_data['sigma'] * value
-			routes.append(route)
+		# if len(node_history) < 2 or edge[1] != node_history[-2]:
+		edge_data = graph[edge[0]][edge[1]]
+		value, route = cfr_player2(node_history + [edge[1]], grid_x, grid_y, p1,
+						edge_data['sigma'] * p2, rem_dist - edge_data['distance'], visited + [edge])
+		cf_values2[edge_index] = value
+		cf_value_curr += edge_data['sigma'] * value
+		routes.append(route)
 
 	for edge_index, edge in enumerate(edges):
-		if len(node_history) < 2 or edge[1] != node_history[-2]:
-			edge_data = graph[edge[0]][edge[1]]
-			edge_data['regret'] += p1 * (cf_values2[edge_index] - cf_value_curr)
-			edge_data['avg_strat'] += p2 * edge_data['sigma']
+		# if len(node_history) < 2 or edge[1] != node_history[-2]:
+		edge_data = graph[edge[0]][edge[1]]
+		edge_data['regret'] += p1 * (cf_values2[edge_index] - cf_value_curr)
+		edge_data['avg_strat'] += p2 * edge_data['sigma']
 
-	regret_matching2(curr_node)
+	regret_matching2(edges)
 
 	return cf_value_curr, node_history
 
@@ -109,8 +110,7 @@ def regret_matching1():
 				sigma1[grid_x][grid_y] = 1/(grid_x*grid_y)
 
 
-def regret_matching2(curr_node):
-	edges = graph.edges(curr_node)
+def regret_matching2(edges):
 	regret = []
 	for edge in edges:
 		edge_data = graph[edge[0]][edge[1]]
