@@ -23,7 +23,14 @@ def init():
 	average_strat1 = [[0] * grid_dim_y] * grid_dim_x
 	global regret1
 	regret1 = [[0] * grid_dim_y] * grid_dim_x
-
+	global vis
+	vis = {**{(edge[1], edge[0]): 0 for edge in graph.edges()}, **{(edge[0], edge[1]): 0 for edge in graph.edges()}}
+	global sigma2
+	sigma2 = {**{(edge[1], edge[0]): 1/(2*len(graph.edges())) for edge in graph.edges()}, **{(edge[0], edge[1]): 1/(2*len(graph.edges())) for edge in graph.edges()}}
+	global regret2
+	regret2 = {**{(edge[1], edge[0]): 0 for edge in graph.edges()}, **{(edge[0], edge[1]): 0 for edge in graph.edges()}}
+	global average_strat2
+	average_strat2 = {**{(edge[1], edge[0]): 0 for edge in graph.edges()}, **{(edge[0], edge[1]): 0 for edge in graph.edges()}}
 
 def cfr_player1():
 	p1 = 1
@@ -66,16 +73,17 @@ def cfr_player2(node_history, grid_x, grid_y, p1, p2, rem_dist, visited):
 		# if len(node_history) < 2 or edge[1] != node_history[-2]:
 		edge_data = graph[edge[0]][edge[1]]
 		value, route = cfr_player2(node_history + [edge[1]], grid_x, grid_y, p1,
-						edge_data['sigma'] * p2, rem_dist - edge_data['distance'], visited + [edge])
+						sigma2[edge] * p2, rem_dist - edge_data['distance'], visited + [edge])
 		cf_values2[edge_index] = value
-		cf_value_curr += edge_data['sigma'] * value
+		cf_value_curr += sigma2[edge] * value
 		routes.append(route)
 
 	for edge_index, edge in enumerate(edges):
 		# if len(node_history) < 2 or edge[1] != node_history[-2]:
 		edge_data = graph[edge[0]][edge[1]]
-		edge_data['regret'] += p1 * (cf_values2[edge_index] - cf_value_curr)
-		edge_data['avg_strat'] += p2 * edge_data['sigma']
+		regret2[edge] += p1 * (cf_values2[edge_index] - cf_value_curr)
+		average_strat2[edge] += p2 * edge_data['sigma']
+		vis[edge] += 1
 
 	regret_matching2(edges)
 
@@ -113,17 +121,15 @@ def regret_matching1():
 def regret_matching2(edges):
 	regret = []
 	for edge in edges:
-		edge_data = graph[edge[0]][edge[1]]
-		regret.append(max(edge_data['regret'], 0))
+		regret.append(max(regret2[edge], 0))
 	den = sum(regret)
 	if den > 0:
 		for edge_index, edge in enumerate(edges):
-			edge_data = graph[edge[0]][edge[1]]
-			edge_data['sigma'] = regret[edge_index] / den
+			sigma2[edge] = regret[edge_index] / den
 	else:
 		for edge_index, edge in enumerate(edges):
 			edge_data = graph[edge[0]][edge[1]]
-			edge_data['sigma'] = 1/len(edges)
+			sigma2[edge] = 1/len(edges)
 
 
 def route_from_edges(edges):
@@ -137,5 +143,7 @@ def route_from_edges(edges):
 
 init()
 print(cfr_player1())
-for n1, n2 in graph.edges_iter():
-    print(n1, n2, graph[n1][n2]['avg_strat']/T)
+s=0
+for n1, n2 in sigma2.keys():
+    print(n1, n2, sigma2[(n1,n2)])
+    s += sigma2[(n1,n2)]
