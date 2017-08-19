@@ -75,22 +75,21 @@ def cfr_player2(node_history, grid_x, grid_y, p1, p2, rem_dist):
 	vals = copy.deepcopy(sigma2)
 
 	for _ in range(T):
-		vals = values(node_history, sigma2, vals, grid_x, grid_y, p1, p2, 0, rem_dist, [node_history[-1]])
+		vals = values(node_history, sigma2, vals, grid_x, grid_y, p1, p2, 0, rem_dist, [])
 		# Update strategy for the whole subtree!
 		regret2, sigma2, avg_strat2 = regret_matching2(sigma2, vals, curr_node, regret2, avg_strat2, subtree_nodes)
 
 	next_edge = max(avg_strat2.items(), key=operator.itemgetter(1))[0]
 
-	route = route + [next_edge]
+	route.append(next_edge)
 
-	return cfr_player2(node_history + [next_edge], grid_x, grid_y, p1, avg_strat1[next_edge] * p2, rem_dist)
+	return cfr_player2(node_history + [next_edge[1]], grid_x, grid_y, p1, avg_strat2[next_edge] * p2, rem_dist)
 
 
 def values(node_history, sigma2, vals, grid_x, grid_y, p1, p2, d, rem_dist, subtree_visited):
 	curr_node = node_history[-1]
 	edges = graph.edges(curr_node)
-	edges = [edge for edge in edges if (edge[0], edge[1]) not in route+subtree_visited or (edge[1], edge[0])
-																		not in route+subtree_visited]
+	edges = [edge for edge in edges if (edge[0], edge[1]) not in route+subtree_visited or (edge[1], edge[0]) not in route+subtree_visited]
 
 	if rem_dist <= dist.iloc[int(curr_node), int(base)] or (len(node_history) > 1 and int(curr_node) == int(base)) \
 			or len(edges) == 0:
