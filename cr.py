@@ -3,23 +3,29 @@ import networkx as nx
 import pandas as pd
 import copy
 import operator
+import os
+import random
+import scipy as sp
+from scipy import sparse
+import numpy as np
 
-max_depth = 4
-T = 20
-grid_dim_x = 1
-grid_dim_y = 2
+max_depth = 2
+T = 3
+grid_dim_x = 26
+grid_dim_y = 26
 base = 0.0
-route_length = 5
+route_length = 9000
 
 
 def init():
-	df = pd.read_csv("simple/nodes_list.txt", sep=" ")
+	df = pd.read_csv("data/paws_mdp_out.txt", sep=" ")
 	global dist
-	dist = pd.read_csv("simple/dist_simple.gop", sep=" ")
+	dist = pd.read_csv("data/dist.gop", sep=" ", header=None)
 	global graph
 	graph = \
-		nx.from_pandas_dataframe(df, source='node_from', target='node_to', edge_attr=['distance', 'animal_density',
-														'grid_cell_x', 'grid_cell_y', 'sigma', 'regret', 'avg_strat'])
+		nx.from_pandas_dataframe(df, source='node_from', target='node_to',
+		                         edge_attr=['distance', 'animal_density', 'grid_cell_x', 'grid_cell_y'])
+	graph = nx.subgraph(graph, nx.node_connected_component(graph, base))
 	global sigma1
 	sigma1 = [[1/(grid_dim_x*grid_dim_y)] * grid_dim_y] * grid_dim_x
 	global avg_strat1
@@ -38,7 +44,7 @@ def cfr_player1():
 		accum_val = 0
 
 		for (grid_x, grid_y) in product(range(grid_dim_x), range(grid_dim_y)):
-			cf_values1[grid_x][grid_y],_ = \
+			cf_values1[grid_x][grid_y] = \
 				cfr_player2([base], grid_x, grid_y, sigma1[grid_x][grid_y] * p1, p2, route_length)
 			accum_val += sigma1[grid_x][grid_y] * cf_values1[grid_x][grid_y]
 
@@ -63,42 +69,44 @@ def cfr_player2(node_history, grid_x, grid_y, p1, p2, rem_dist):
 			or len(edges) == 0:
 		return compute_value_from_route(node_history, grid_x, grid_y)
 
-	sigma2 = get_empty_dict2(curr_node)
+	sigma2, subtree_nodes = get_empty_dict2(curr_node)
 	regret2 = copy.deepcopy(sigma2)
 	avg_strat2 = {edge: 0 for edge in edges}
+	vals = copy.deepcopy(sigma2)
 
 	for _ in range(T):
-		val = value(node_history, sigma2, grid_x, grid_y, p1, p2, 0, rem_dist)
+		vals = values(node_history, sigma2, vals, grid_x, grid_y, p1, p2, 0, rem_dist, [node_history[-1]])
 		# Update strategy for the whole subtree!
-		regrets, sigma2, avg_strat2 = regret_matching2(sigma2, val, curr_node, regret2, avg_strat2)
+		regret2, sigma2, avg_strat2 = regret_matching2(sigma2, vals, curr_node, regret2, avg_strat2, subtree_nodes)
 
-	next_edge = max(avg_strat2.iteritems(), key=operator.itemgetter(1))[0]
+	next_edge = max(avg_strat2.items(), key=operator.itemgetter(1))[0]
 
 	route = route + [next_edge]
 
 	return cfr_player2(node_history + [next_edge], grid_x, grid_y, p1, avg_strat1[next_edge] * p2, rem_dist)
 
 
-def value(node_history, sigma2, grid_x, grid_y, p1, p2, d, rem_dist, subtree_visited):
+def values(node_history, sigma2, vals, grid_x, grid_y, p1, p2, d, rem_dist, subtree_visited):
 	curr_node = node_history[-1]
 	edges = graph.edges(curr_node)
 	edges = [edge for edge in edges if (edge[0], edge[1]) not in route+subtree_visited or (edge[1], edge[0])
-																						not in route+subtree_visited]
+																		not in route+subtree_visited]
 
 	if rem_dist <= dist.iloc[int(curr_node), int(base)] or (len(node_history) > 1 and int(curr_node) == int(base)) \
 			or len(edges) == 0:
-		return compute_value_from_route(node_history, grid_x, grid_y), node_history
+		vals[(node_history[-2], node_history[-1])] = compute_value_from_route(node_history, grid_x, grid_y)
+		return vals
 
 	if d > max_depth:
-		# Call heuristic
-		pass
+		vals[(node_history[-2], node_history[-1])] = heuristic(grid_x, grid_y, rem_dist)
+		return vals
 
 	for edge_index, edge in enumerate(edges):
 		edge_data = graph[edge[0]][edge[1]]
-		val = value(node_history + [edge[1]], grid_x, grid_y, p1,
+		vals = values(node_history + [edge[1]], sigma2, vals, grid_x, grid_y, p1,
 						sigma2[edge] * p2, d+1, rem_dist - edge_data['distance'], subtree_visited+[edge])
 
-	return val
+	return vals
 
 
 def compute_value_from_route(route, grid_x, grid_y):
@@ -126,20 +134,31 @@ def regret_matching1():
 	else:
 		for grid_x in range(grid_dim_x):
 			for grid_y in range(grid_dim_y):
-				sigma1[grid_x][grid_y] = 1/(grid_x*grid_y)
+				sigma1[grid_x][grid_y] = 1/(grid_dim_x*grid_dim_y)
 
 
-def regret_matching2(sigma2, val, curr_node, regret2, avg_strat2):
+def regret_matching2(sigma2, vals, curr_node, regret2, avg_strat2, subtree_nodes):
+	# regret = {key: 0 for key in regret2.keys()}
 	regret = {}
-	for edge, regret in regret2:
-		regret[edge].append(max(regret2[edge], 0))
+	for edge, _ in regret2.items():
+		regret[edge] = max(regret2[edge], 0)
 	den = sum(regret.values())
 
+	node_vals = {}
+	for node in subtree_nodes:
+		node_vals[node] = 0
+		for edge, value in vals.items():
+			if node in edge:
+				node_vals[node] += value/2
+
+
 	for edge in regret2.keys():
-		regret2[edge] += val[edge[1]] - val[edge[0]]
+		# We need counterfactual values per node, not edges! TODO: Sum up CF values of the edges.
+		regret2[edge] += node_vals[edge[1]] - node_vals[edge[0]]
 		sigma2[edge] = regret[edge] / den if den > 0 else 1/len(regret2)
 		if edge in graph.edges(curr_node):
-			avg_strat2[edge] += sigma2 / T
+			avg_strat2[edge] += sigma2[edge] / T
+	return regret2, sigma2, avg_strat2
 
 
 
@@ -154,11 +173,26 @@ def route_from_edges(edges):
 
 def get_empty_dict2(curr_node):
 	visited_nodes = [curr_node]
-	oriented = graph.to_oriented()
-	edges = [edge for edge in oriented.edges() if (edge[0], edge[1]) not in route or (edge[1], edge[0]) not in route]
-	for d in range(max_depth):
-		for node in visited_nodes:
-			visited_nodes += graph.neigbors(node)
-			edges += [edge for edge in oriented.edges(node) if ((edge[0], edge[1]) not in route or (edge[1], edge[0]) not in route)
-						and edge not in edges]
-	return {edge: 0 for edge in edges}
+	oriented = graph.to_directed()
+	# edges = [edge for edge in oriented.edges() if (edge[0], edge[1]) not in route or (edge[1], edge[0]) not in route]
+	edges = graph.edges(curr_node)
+	to_visit = graph.neighbors(curr_node)
+	for d in range(max_depth-1):
+		while len(to_visit) > 0:
+			node = to_visit.pop()
+			visited_nodes += [node]
+			to_visit += [n for n in graph.neighbors(node) if (n not in visited_nodes and n not in to_visit)]
+			edges += [edge for edge in oriented.edges(node) if (((edge[0], edge[1]) not in route or (edge[1], edge[0]) not in route)
+						and edge not in edges)]
+	return {edge: 0 for edge in edges}, visited_nodes
+
+def heuristic(grid_x, grid_y, rem_dist):
+	cmd = 'mpirun -n 2 python2.7 ./loader.py op dist.gop 1 100 logfile ' + str(rem_dist)
+	os.system(cmd)
+	with open('logfile') as f:
+		ret = f.readline().split('\t')
+	return float(ret[2])
+
+init()
+print(cfr_player1())
+print(route)
