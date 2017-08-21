@@ -5,35 +5,137 @@ import copy
 import operator
 import os
 import random
-import scipy as sp
-from scipy import sparse
 import numpy as np
+import matplotlib.pyplot as pp
 
-max_depth = 2
-T = 3
-grid_dim_x = 26
-grid_dim_y = 26
-base = 0.0
-route_length = 9000
+
+def init_random():
+	global max_depth
+	global T
+	global grid_dim_x
+	global grid_dim_y
+	global base
+	global route_length
+
+	max_depth = 2
+	T = 3
+	grid_dim_x = 5
+	grid_dim_y = 5
+	base = 0
+	route_length = 40
+
+	global graph
+	global dist
+	global sigma1
+	global avg_strat1
+	global regret1
+	global route
+	global num_nodes
+	global total_distance
+	global total_reward
+
+	num_nodes = 20
+	total_distance = 0
+	total_reward = 0
+
+	graph = nx.powerlaw_cluster_graph(num_nodes, 2, 0.3)
+	graph = nx.subgraph(graph, nx.node_connected_component(graph, base))
+	for (u, v) in graph.edges():
+		graph.edge[u][v]['distance'] = 0 if u == v else random.randint(1, 10)
+		graph.edge[u][v]['animal_density'] = random.randint(0, 20)
+		graph.edge[u][v]['grid_cell_x'] = random.randint(0, grid_dim_x-1)
+		graph.edge[u][v]['grid_cell_y'] = random.randint(0, grid_dim_y-1)
+	dist = nx.floyd_warshall_numpy(graph, weight='distance')
+	with open('dist_rand.gop', 'w') as f:
+		f.write(str(num_nodes) + " 1 " + str(int(base)) + " " + str(int(base)) + "\n")
+	with open('dist_rand.gop', 'ab') as f:
+		for line in np.matrix(dist):
+			np.savetxt(f, line, fmt='%.2f')
+	with open('dist_rand.gop', 'a') as f:
+		for _ in range(num_nodes):
+			f.write(str(random.randint(0, 10)) + '\n')
+
+	nx.draw_networkx(graph, pos=nx.spring_layout(graph))
+	pp.show()
+
+	sigma1 = [[1 / (grid_dim_x * grid_dim_y)] * grid_dim_y] * grid_dim_x
+	avg_strat1 = [[0] * grid_dim_y] * grid_dim_x
+	regret1 = [[0] * grid_dim_y] * grid_dim_x
+	route = []
+
+
+def init_simple():
+	global max_depth
+	global T
+	global grid_dim_x
+	global grid_dim_y
+	global base
+	global route_length
+	global total_distance
+	global total_reward
+
+	total_distance = 0
+	total_reward = 0
+	T = 4 # Num. of iterations
+	grid_dim_x = 1
+	grid_dim_y = 2
+	base = 0.0 # Starting node number
+	route_length = 10 # Distance limit
+
+	global graph
+	global dist
+	global sigma1
+	global avg_strat1
+	global regret1
+	global route
+
+	df = pd.read_csv("simple/nodes_list.txt", sep=" ")
+	dist = pd.read_csv("simple/dist_simple.gop", sep=" ", header=None)
+	graph = \
+		nx.from_pandas_dataframe(df, source='node_from', target='node_to',
+		                         edge_attr=['distance', 'animal_density', 'grid_cell_x', 'grid_cell_y'])
+	sigma1 = [[1 / (grid_dim_x * grid_dim_y)] * grid_dim_y] * grid_dim_x
+	avg_strat1 = [[0] * grid_dim_y] * grid_dim_x
+	regret1 = [[0] * grid_dim_y] * grid_dim_x
+	route = []
 
 
 def init():
-	df = pd.read_csv("data/paws_mdp_out.txt", sep=" ")
-	global dist
-	dist = pd.read_csv("data/dist.gop", sep=" ", header=None)
+	global max_depth
+	global T
+	global grid_dim_x
+	global grid_dim_y
+	global base
+	global route_length
+	global total_distance
+	global total_reward
+
+	total_distance = 0
+	total_reward = 0
+	max_depth = 2
+	T = 3
+	grid_dim_x = 26
+	grid_dim_y = 26
+	base = 0.0
+	route_length = 9000
+
 	global graph
+	global dist
+	global sigma1
+	global avg_strat1
+	global regret1
+	global route
+
+	df = pd.read_csv("data/paws_mdp_out.txt", sep=" ")
+	dist = pd.read_csv("data/dist.gop", sep=" ", header=None)
 	graph = \
 		nx.from_pandas_dataframe(df, source='node_from', target='node_to',
 		                         edge_attr=['distance', 'animal_density', 'grid_cell_x', 'grid_cell_y'])
 	graph = nx.subgraph(graph, nx.node_connected_component(graph, base))
-	global sigma1
 	sigma1 = [[1/(grid_dim_x*grid_dim_y)] * grid_dim_y] * grid_dim_x
-	global avg_strat1
 	avg_strat1 = [[0] * grid_dim_y] * grid_dim_x
-	global regret1
 	regret1 = [[0] * grid_dim_y] * grid_dim_x
-	global route
-	route = [] # Will store the best route
+	route = []
 
 def cfr_player1():
 	p1 = 1
@@ -61,11 +163,15 @@ def cfr_player1():
 
 def cfr_player2(node_history, grid_x, grid_y, p1, p2, rem_dist):
 	global route
+	global total_distance
+	global total_reward
+
 	curr_node = node_history[-1]
 	edges = graph.edges(curr_node)
 	edges = [edge for edge in edges if (edge[0], edge[1]) not in route or (edge[1], edge[0]) not in route]
 
-	if rem_dist <= dist.iloc[int(curr_node), int(base)] or (len(node_history) > 1 and int(curr_node) == int(base)) \
+	# rem_dist <= dist.iloc[int(curr_node), int(base)]
+	if rem_dist <= nx.shortest_path_length(graph, int(curr_node), int(base)) or (len(node_history) > 1 and int(curr_node) == int(base)) \
 			or len(edges) == 0:
 		return compute_value_from_route(node_history, grid_x, grid_y)
 
@@ -76,14 +182,18 @@ def cfr_player2(node_history, grid_x, grid_y, p1, p2, rem_dist):
 
 	for _ in range(T):
 		vals = values(node_history, sigma2, vals, grid_x, grid_y, p1, p2, 0, rem_dist, [])
-		# Update strategy for the whole subtree!
-		regret2, sigma2, avg_strat2 = regret_matching2(sigma2, vals, curr_node, regret2, avg_strat2, subtree_nodes)
+		regret2, sigma2, avg_strat2 = regret_matching2(sigma2, vals, regret2, avg_strat2, subtree_nodes)
 
 	next_edge = max(avg_strat2.items(), key=operator.itemgetter(1))[0]
 
-	route.append(next_edge)
+	print(next_edge)
 
-	return cfr_player2(node_history + [next_edge[1]], grid_x, grid_y, p1, avg_strat2[next_edge] * p2, rem_dist)
+	route.append(next_edge)
+	total_distance += graph[next_edge[0]][next_edge[1]]['distance']
+	total_reward += graph[next_edge[0]][next_edge[1]]['animal_density']
+
+	return cfr_player2(node_history + [next_edge[1]], grid_x, grid_y, p1, avg_strat2[next_edge] * p2,
+	                   rem_dist - graph[next_edge[0]][next_edge[1]]['distance'])
 
 
 def values(node_history, sigma2, vals, grid_x, grid_y, p1, p2, d, rem_dist, subtree_visited):
@@ -91,13 +201,14 @@ def values(node_history, sigma2, vals, grid_x, grid_y, p1, p2, d, rem_dist, subt
 	edges = graph.edges(curr_node)
 	edges = [edge for edge in edges if (edge[0], edge[1]) not in route+subtree_visited or (edge[1], edge[0]) not in route+subtree_visited]
 
-	if rem_dist <= dist.iloc[int(curr_node), int(base)] or (len(node_history) > 1 and int(curr_node) == int(base)) \
+	# rem_dist <= dist.iloc[int(curr_node), int(base)]
+	if rem_dist <= nx.shortest_path_length(graph, int(curr_node), int(base)) or (len(node_history) > 1 and int(curr_node) == int(base)) \
 			or len(edges) == 0:
 		vals[(node_history[-2], node_history[-1])] = compute_value_from_route(node_history, grid_x, grid_y)
 		return vals
 
 	if d > max_depth:
-		vals[(node_history[-2], node_history[-1])] = heuristic(grid_x, grid_y, rem_dist)
+		vals[(node_history[-2], node_history[-1])] = heuristic(node_history[-1], grid_x, grid_y, rem_dist)
 		return vals
 
 	for edge_index, edge in enumerate(edges):
@@ -136,7 +247,7 @@ def regret_matching1():
 				sigma1[grid_x][grid_y] = 1/(grid_dim_x*grid_dim_y)
 
 
-def regret_matching2(sigma2, vals, curr_node, regret2, avg_strat2, subtree_nodes):
+def regret_matching2(sigma2, vals, regret2, avg_strat2, subtree_nodes):
 	# regret = {key: 0 for key in regret2.keys()}
 	regret = {}
 	for edge, _ in regret2.items():
@@ -152,10 +263,9 @@ def regret_matching2(sigma2, vals, curr_node, regret2, avg_strat2, subtree_nodes
 
 
 	for edge in regret2.keys():
-		# We need counterfactual values per node, not edges! TODO: Sum up CF values of the edges.
 		regret2[edge] += node_vals[edge[1]] - node_vals[edge[0]]
 		sigma2[edge] = regret[edge] / den if den > 0 else 1/len(regret2)
-		if edge in graph.edges(curr_node):
+		if edge in avg_strat2.keys():
 			avg_strat2[edge] += sigma2[edge] / T
 	return regret2, sigma2, avg_strat2
 
@@ -185,13 +295,24 @@ def get_empty_dict2(curr_node):
 						and edge not in edges)]
 	return {edge: 0 for edge in edges}, visited_nodes
 
-def heuristic(grid_x, grid_y, rem_dist):
-	cmd = 'mpirun -n 2 python2.7 ./loader.py op dist.gop 1 100 logfile ' + str(rem_dist)
+def heuristic(curr_node, grid_x, grid_y, rem_dist):
+	with open('dist_rand.gop', 'r') as f:
+		lines = f.readlines()
+		lines[0] = str(num_nodes) + " 1 " + str(int(curr_node)) + " " + str(int(base)) + "\n"
+	with open('dist_rand.gop', 'w') as f:
+		for line in lines:
+			f.write(line)
+	cmd = 'mpirun -n 2 python2.7 ./loader.py op dist_rand.gop 1 100 logfile ' + str(int(rem_dist))
 	os.system(cmd)
 	with open('logfile') as f:
 		ret = f.readline().split('\t')
-	return float(ret[2])
+	try:
+		return float(ret[2])
+	except:
+		return 0
 
-init()
-print(cfr_player1())
+init_random()
+cfr_player2([base], 2, 4, 1, 1, route_length)
 print(route)
+print(total_distance)
+print(total_reward)
