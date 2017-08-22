@@ -7,9 +7,11 @@ import os
 import random
 import numpy as np
 import matplotlib.pyplot as pp
+from collections import deque
+import time
 
 
-def init_random():
+def init_random(edges_per_node): # max_depth, T, route_length, num_nodes, edges_per_node):
 	global max_depth
 	global T
 	global grid_dim_x
@@ -22,7 +24,7 @@ def init_random():
 	grid_dim_x = 5
 	grid_dim_y = 5
 	base = 0
-	route_length = 40
+	# route_length = 40
 
 	global graph
 	global dist
@@ -34,11 +36,11 @@ def init_random():
 	global total_distance
 	global total_reward
 
-	num_nodes = 20
+	# num_nodes = 20
 	total_distance = 0
 	total_reward = 0
 
-	graph = nx.powerlaw_cluster_graph(num_nodes, 2, 0.3)
+	graph = nx.powerlaw_cluster_graph(num_nodes, edges_per_node, 0.3)
 	graph = nx.subgraph(graph, nx.node_connected_component(graph, base))
 	for (u, v) in graph.edges():
 		graph.edge[u][v]['distance'] = 0 if u == v else random.randint(1, 10)
@@ -167,15 +169,14 @@ def cfr_player2(node_history, grid_x, grid_y, p1, p2, rem_dist):
 	global total_reward
 
 	curr_node = node_history[-1]
-	edges = graph.edges(curr_node)
-	edges = [edge for edge in edges if (edge[0], edge[1]) not in route or (edge[1], edge[0]) not in route]
+	edges = [edge for edge in graph.edges(curr_node) if (edge[0], edge[1]) not in route or (edge[1], edge[0]) not in route]
 
 	# rem_dist <= dist.iloc[int(curr_node), int(base)]
 	if rem_dist <= nx.shortest_path_length(graph, int(curr_node), int(base)) or (len(node_history) > 1 and int(curr_node) == int(base)) \
 			or len(edges) == 0:
 		return compute_value_from_route(node_history, grid_x, grid_y)
 
-	sigma2, subtree_nodes = get_empty_dict2(curr_node)
+	sigma2, subtree_nodes = get_empty_dict2_eff(curr_node)
 	regret2 = copy.deepcopy(sigma2)
 	avg_strat2 = {edge: 0 for edge in edges}
 	vals = copy.deepcopy(sigma2)
@@ -224,6 +225,7 @@ def compute_value_from_route(route, grid_x, grid_y):
 	for index, node in enumerate(route[:-1]):
 		if route[index] != [route[index + 1]]:
 			edge_data = graph[route[index]][route[index+1]]
+			# If we wanted distr. over cells as input, just multiply here by prob. of attack
 			if edge_data['grid_cell_x'] == grid_x and edge_data['grid_cell_y'] == grid_y:
 				value += edge_data['animal_density']
 			else:
@@ -248,7 +250,6 @@ def regret_matching1():
 
 
 def regret_matching2(sigma2, vals, regret2, avg_strat2, subtree_nodes):
-	# regret = {key: 0 for key in regret2.keys()}
 	regret = {}
 	for edge, _ in regret2.items():
 		regret[edge] = max(regret2[edge], 0)
@@ -260,7 +261,6 @@ def regret_matching2(sigma2, vals, regret2, avg_strat2, subtree_nodes):
 		for edge, value in vals.items():
 			if node in edge:
 				node_vals[node] += value/2
-
 
 	for edge in regret2.keys():
 		regret2[edge] += node_vals[edge[1]] - node_vals[edge[0]]
@@ -280,10 +280,9 @@ def route_from_edges(edges):
 	return ret
 
 
-def get_empty_dict2(curr_node):
+def get_empty_dict2_slow(curr_node):
 	visited_nodes = [curr_node]
 	oriented = graph.to_directed()
-	# edges = [edge for edge in oriented.edges() if (edge[0], edge[1]) not in route or (edge[1], edge[0]) not in route]
 	edges = graph.edges(curr_node)
 	to_visit = graph.neighbors(curr_node)
 	for d in range(max_depth-1):
@@ -295,6 +294,34 @@ def get_empty_dict2(curr_node):
 						and edge not in edges)]
 	return {edge: 0 for edge in edges}, visited_nodes
 
+def get_empty_dict2_eff(curr_node):
+	node_queue = deque()
+	node_queue.append(curr_node)
+	visited_nodes = [curr_node]
+	edges = []
+	curr_depth = 0
+	elems_to_depth_increase = 1
+	next_elems_to_depth_increase = 0
+
+	while len(node_queue) > 0:
+		curr = node_queue.popleft()
+		for edge in graph.edges(curr):
+			if edge not in edges:
+				edges.append(edge)
+			if edge[1] not in visited_nodes:
+				node_queue.append(edge[1])
+				visited_nodes.append(edge[1])
+		next_elems_to_depth_increase += len(graph.edges(curr))
+		elems_to_depth_increase -= 1
+		if elems_to_depth_increase == 0:
+			curr_depth += 1
+			if curr_depth > max_depth:
+				break
+			elems_to_depth_increase = next_elems_to_depth_increase
+			next_elems_to_depth_increase = 0
+	return {edge: 0 for edge in edges}, visited_nodes
+
+
 def heuristic(curr_node, grid_x, grid_y, rem_dist):
 	with open('dist_rand.gop', 'r') as f:
 		lines = f.readlines()
@@ -302,6 +329,7 @@ def heuristic(curr_node, grid_x, grid_y, rem_dist):
 	with open('dist_rand.gop', 'w') as f:
 		for line in lines:
 			f.write(line)
+
 	cmd = 'mpirun -n 2 python2.7 ./loader.py op dist_rand.gop 1 100 logfile ' + str(int(rem_dist))
 	os.system(cmd)
 	with open('logfile') as f:
@@ -311,8 +339,39 @@ def heuristic(curr_node, grid_x, grid_y, rem_dist):
 	except:
 		return 0
 
-init_random()
-cfr_player2([base], 2, 4, 1, 1, route_length)
-print(route)
-print(total_distance)
-print(total_reward)
+
+def test():
+	global max_depth
+	global T
+	global route_length
+	global num_nodes
+	Ts = [3]
+	max_depths = [2]
+	route_lengths = [40]
+	node_counts = [20]
+	edges_per_node_list = [2]
+	num_tests = 1
+
+	with open('test_results', 'w') as f:
+		f.write("T max_depth  route_length num_nodes edges_per_node\n")
+
+	for T in Ts:
+		for max_depth in max_depths:
+			for route_length in route_lengths:
+				for num_nodes in node_counts:
+					for edges_per_node in edges_per_node_list:
+						with open('test_results', 'a') as f:
+							f.write(str(T) + " " + str(max_depth) + " " + str(route_length) + " " + str(num_nodes) + " " + str(edges_per_node))
+						for _ in range(num_tests):
+							init_random(edges_per_node) # max_depth, T, route_length, node_count, num_nodes)
+							start = time.time()
+							cfr_player2([base], 2, 4, 1, 1, route_length)
+							end = time.time()
+							with open('test_results', 'a') as f:
+								f.write(str(start-end) + '\n')
+							print(route)
+							print(total_distance)
+							print(total_reward)
+							print(end-start)
+
+test()
