@@ -19,8 +19,8 @@ def init_random(edges_per_node): # max_depth, T, route_length, num_nodes, edges_
 	global base
 	global route_length
 
-	max_depth = 2
-	T = 3
+	# max_depth = 2
+	# T = 3
 	grid_dim_x = 5
 	grid_dim_y = 5
 	base = 0
@@ -57,8 +57,8 @@ def init_random(edges_per_node): # max_depth, T, route_length, num_nodes, edges_
 		for _ in range(num_nodes):
 			f.write(str(random.randint(0, 10)) + '\n')
 
-	nx.draw_networkx(graph, pos=nx.spring_layout(graph))
-	pp.show()
+	# nx.draw_networkx(graph, pos=nx.spring_layout(graph))
+	# pp.show()
 
 	sigma1 = [[1 / (grid_dim_x * grid_dim_y)] * grid_dim_y] * grid_dim_x
 	avg_strat1 = [[0] * grid_dim_y] * grid_dim_x
@@ -294,6 +294,7 @@ def get_empty_dict2_slow(curr_node):
 						and edge not in edges)]
 	return {edge: 0 for edge in edges}, visited_nodes
 
+
 def get_empty_dict2_eff(curr_node):
 	node_queue = deque()
 	node_queue.append(curr_node)
@@ -345,33 +346,49 @@ def test():
 	global T
 	global route_length
 	global num_nodes
-	Ts = [3]
-	max_depths = [2]
-	route_lengths = [40]
-	node_counts = [20]
-	edges_per_node_list = [2]
-	num_tests = 1
+	global route
+	global total_distance
+	global total_reward
+	Ts = [2, 3, 4]
+	max_depths = [2, 3, 4]
+	route_lengths = [20, 30, 40, 50]
+	node_counts = [20, 30, 40, 50]
+	edges_per_node_list = [2, 3, 4]
+	num_tests = 3
 
 	with open('test_results', 'w') as f:
 		f.write("T max_depth  route_length num_nodes edges_per_node\n")
 
-	for T in Ts:
-		for max_depth in max_depths:
-			for route_length in route_lengths:
-				for num_nodes in node_counts:
-					for edges_per_node in edges_per_node_list:
+	for num_nodes in node_counts:
+		for edges_per_node in edges_per_node_list:
+			init_random(edges_per_node)  # max_depth, T, route_length, node_count, num_nodes)
+			for T in Ts:
+				for max_depth in max_depths:
+					for route_length in route_lengths:
 						with open('test_results', 'a') as f:
-							f.write(str(T) + " " + str(max_depth) + " " + str(route_length) + " " + str(num_nodes) + " " + str(edges_per_node))
+							f.write("\n" + str(T) + " " + str(max_depth) + " " + str(route_length) + " " + str(num_nodes) + " " + str(edges_per_node) + "\n")
 						for _ in range(num_tests):
-							init_random(edges_per_node) # max_depth, T, route_length, node_count, num_nodes)
 							start = time.time()
 							cfr_player2([base], 2, 4, 1, 1, route_length)
 							end = time.time()
 							with open('test_results', 'a') as f:
-								f.write(str(start-end) + '\n')
+								f.write(str(end-start) + '\n')
+								f.write(str(len(route)) + '\n')
+								f.write(str(total_distance) + '\n')
 							print(route)
 							print(total_distance)
 							print(total_reward)
 							print(end-start)
+							route = []
+							total_distance = 0
+							total_reward = 0
+	with open('test_results', 'a') as f:
+		f.write("Main dataset: \n")
+	init()
+	start = time.time()
+	cfr_player2([base], 2, 4, 1, 1, 9000)
+	end = time.time()
+	with open('test_results', 'a') as f:
+		f.write(str(end - start) + '\n')
 
 test()
