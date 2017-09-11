@@ -57,8 +57,8 @@ def init_random(edges_per_node): # max_depth, T, route_length, num_nodes, edges_
 		for _ in range(num_nodes):
 			f.write(str(random.randint(0, 10)) + '\n')
 
-	# nx.draw_networkx(graph, pos=nx.spring_layout(graph))
-	# pp.show()
+	nx.draw_networkx(graph, pos=nx.spring_layout(graph))
+	pp.show()
 
 	sigma1 = [[1 / (grid_dim_x * grid_dim_y)] * grid_dim_y] * grid_dim_x
 	avg_strat1 = [[0] * grid_dim_y] * grid_dim_x
@@ -169,9 +169,11 @@ def cfr_player2(node_history, grid_x, grid_y, p1, p2, rem_dist):
 	global total_reward
 
 	curr_node = node_history[-1]
+	# TODO: Pozor na most + jen ty, ze kterych se lze vratit
 	edges = [edge for edge in graph.edges(curr_node) if (edge[0], edge[1]) not in route or (edge[1], edge[0]) not in route]
 
 	# rem_dist <= dist.iloc[int(curr_node), int(base)]
+	# TODO: Lze predpocitat
 	if rem_dist <= nx.shortest_path_length(graph, int(curr_node), int(base)) or (len(node_history) > 1 and int(curr_node) == int(base)) \
 			or len(edges) == 0:
 		return compute_value_from_route(node_history, grid_x, grid_y)
