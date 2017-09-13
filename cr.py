@@ -1,3 +1,4 @@
+import pyximport; pyximport.install()
 from itertools import product
 import networkx as nx
 import pandas as pd
@@ -9,6 +10,9 @@ import numpy as np
 import matplotlib.pyplot as pp
 from collections import deque
 import time
+from lib import op, monitor
+from mpi4py import MPI
+import sys
 
 
 def init_random(edges_per_node): # max_depth, T, route_length, num_nodes, edges_per_node):
@@ -35,6 +39,7 @@ def init_random(edges_per_node): # max_depth, T, route_length, num_nodes, edges_
 	global num_nodes
 	global total_distance
 	global total_reward
+	global items
 
 	# num_nodes = 20
 	total_distance = 0
@@ -47,7 +52,8 @@ def init_random(edges_per_node): # max_depth, T, route_length, num_nodes, edges_
 		graph.edge[u][v]['animal_density'] = random.randint(0, 20)
 		graph.edge[u][v]['grid_cell_x'] = random.randint(0, grid_dim_x-1)
 		graph.edge[u][v]['grid_cell_y'] = random.randint(0, grid_dim_y-1)
-	dist = nx.floyd_warshall_numpy(graph, weight='distance')
+	dist = nx.floyd_warshall_numpy(graph, weight='distance').tolist()
+	scores = []
 	with open('dist_rand.gop', 'w') as f:
 		f.write(str(num_nodes) + " 1 " + str(int(base)) + " " + str(int(base)) + "\n")
 	with open('dist_rand.gop', 'ab') as f:
@@ -55,7 +61,9 @@ def init_random(edges_per_node): # max_depth, T, route_length, num_nodes, edges_
 			np.savetxt(f, line, fmt='%.2f')
 	with open('dist_rand.gop', 'a') as f:
 		for _ in range(num_nodes):
-			f.write(str(random.randint(0, 10)) + '\n')
+			r = random.randint(0, 10)
+			f.write(str(r) + '\n')
+			scores.append(r)
 
 	nx.draw_networkx(graph, pos=nx.spring_layout(graph))
 	pp.show()
@@ -64,6 +72,7 @@ def init_random(edges_per_node): # max_depth, T, route_length, num_nodes, edges_
 	avg_strat1 = [[0] * grid_dim_y] * grid_dim_x
 	regret1 = [[0] * grid_dim_y] * grid_dim_x
 	route = []
+	items = [op.OPItem(i, x, 0.0, dist[i]) for i, x in enumerate(scores)]
 
 
 def init_simple():
@@ -325,7 +334,7 @@ def get_empty_dict2_eff(curr_node):
 	return {edge: 0 for edge in edges}, visited_nodes
 
 
-def heuristic(curr_node, grid_x, grid_y, rem_dist):
+def heuristic_old(curr_node, grid_x, grid_y, rem_dist):
 	with open('dist_rand.gop', 'r') as f:
 		lines = f.readlines()
 		lines[0] = str(num_nodes) + " 1 " + str(int(curr_node)) + " " + str(int(base)) + "\n"
@@ -341,6 +350,22 @@ def heuristic(curr_node, grid_x, grid_y, rem_dist):
 		return float(ret[2])
 	except:
 		return 0
+
+
+def heuristic(curr_node, grid_x, grid_y, rem_dist):
+	global items
+
+	g = op.OP_GRASP_T(comm)
+
+	problem = op.OPProblem(
+		items,
+		curr_node,
+		0,
+		rem_dist
+	)
+
+	solution = g.search(problem, 100)
+	return int(solution.get_score())
 
 
 def test():
@@ -393,4 +418,10 @@ def test():
 	with open('test_results', 'a') as f:
 		f.write(str(end - start) + '\n')
 
-test()
+comm = MPI.COMM_WORLD
+
+if comm.Get_rank() == 0:
+	logfile = open("logfile", "w")
+	monitor.monitor_best(comm, logfile)
+else:
+	test()
