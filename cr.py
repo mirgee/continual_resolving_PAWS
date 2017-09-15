@@ -188,24 +188,37 @@ def cfr_player2(node_history, grid_x, grid_y, p1, p2, rem_dist):
 	edges = []
 	for edge in untraversed_graph.edges(curr_node):
 		next_node = edge[0] if edge[1] == curr_node else edge[1]
+		tmp = untraversed_graph.copy()
+		tmp.remove_edge(curr_node, next_node)
 		# can_return = dist[next_node][base] < rem_dist - dist[curr_node][next_node]
-		can_return = nx.shortest_path_length(untraversed_graph, next_node, base, 'distance') < rem_dist - nx.shortest_path_length(graph, curr_node, next_node, 'distance')
+		can_return = nx.shortest_path_length(tmp, next_node, base, 'distance') < rem_dist - \
+		                            graph[curr_node][next_node]['distance']
+									# nx.shortest_path_length(untraversed_graph, curr_node, next_node, 'distance')
 		if ((edge[0], edge[1]) not in route or (edge[1], edge[0]) not in route) and can_return:
 			edges.append(edge)
 
-
 	# rem_dist <= dist.iloc[int(curr_node), int(base)]
-	if rem_dist <= dist[curr_node][base] or (len(node_history) > 1 and curr_node == base):
+	# if rem_dist <= nx.shortest_path_length(untraversed_graph, curr_node, base, 'distance')
+	if len(node_history) > 1 and curr_node == base:
 			# or len(edges) == 0:
 		return compute_value_from_route(node_history, grid_x, grid_y)
+
+	if len(edges) == 0:
+		nx.draw_networkx(graph, pos=nx.spring_layout(graph))
+		pp.show()
+		nx.draw_networkx(untraversed_graph, pos=nx.spring_layout(untraversed_graph))
+		pp.show()
+		raise Exception("THSI SHOULDNT HAPPEN")
 
 	sigma2, subtree_nodes = get_empty_dict2_eff(curr_node)
 	regret2 = copy.deepcopy(sigma2)
 	avg_strat2 = {edge: 0 for edge in edges}
 	vals = copy.deepcopy(sigma2)
 
+	local_untraversed_graph = untraversed_graph.copy()
+
 	for _ in range(T):
-		vals = values(node_history, sigma2, vals, grid_x, grid_y, p1, p2, 0, rem_dist, [])
+		vals = values(node_history, sigma2, vals, grid_x, grid_y, p1, p2, 0, rem_dist, [], local_untraversed_graph)
 		regret2, sigma2, avg_strat2 = regret_matching2(sigma2, vals, regret2, avg_strat2, subtree_nodes)
 
 	next_edge = max(avg_strat2.items(), key=operator.itemgetter(1))[0]
@@ -220,19 +233,22 @@ def cfr_player2(node_history, grid_x, grid_y, p1, p2, rem_dist):
 	                   rem_dist - graph[next_edge[0]][next_edge[1]]['distance'])
 
 
-def values(node_history, sigma2, vals, grid_x, grid_y, p1, p2, d, rem_dist, subtree_visited):
+def values(node_history, sigma2, vals, grid_x, grid_y, p1, p2, d, rem_dist, subtree_visited, local_untraversed_graph):
 	curr_node = node_history[-1]
 	# edges = [edge for edge in graph.edges(curr_node) if (edge[0], edge[1]) not in route+subtree_visited or (edge[1], edge[0]) not in route+subtree_visited]
 
 	edges = []
-	for edge in graph.edges(curr_node):
+	for edge in local_untraversed_graph.edges(curr_node):
 		next_node = edge[0] if edge[1] == curr_node else edge[1]
-		can_return = dist[next_node][base] < rem_dist - dist[curr_node][next_node]
+		# can_return = dist[next_node][base] < rem_dist - dist[curr_node][next_node]
+		can_return = nx.shortest_path_length(local_untraversed_graph, next_node, base, 'distance') < rem_dist - \
+								nx.shortest_path_length(local_untraversed_graph, curr_node, next_node, 'distance')
 		if ((edge[0], edge[1]) not in route+subtree_visited or (edge[1], edge[0]) not in route+subtree_visited) and can_return:
 			edges.append(edge)
 
 	# rem_dist <= dist.iloc[int(curr_node), int(base)]
-	if rem_dist <= dist[curr_node][base] or (len(node_history) > 1 and curr_node == base):
+	# if rem_dist <= dist[curr_node][base] or
+	if len(node_history) > 1 and curr_node == base:
 			#or len(edges) == 0:
 		vals[(node_history[-2], node_history[-1])] = compute_value_from_route(node_history, grid_x, grid_y)
 		return vals
@@ -244,7 +260,7 @@ def values(node_history, sigma2, vals, grid_x, grid_y, p1, p2, d, rem_dist, subt
 	for edge_index, edge in enumerate(edges):
 		edge_data = graph[edge[0]][edge[1]]
 		vals = values(node_history + [edge[1]], sigma2, vals, grid_x, grid_y, p1,
-						sigma2[edge] * p2, d+1, rem_dist - edge_data['distance'], subtree_visited+[edge])
+						sigma2[edge] * p2, d+1, rem_dist - edge_data['distance'], subtree_visited+[edge], local_untraversed_graph)
 
 	return vals
 
@@ -394,6 +410,7 @@ def test():
 	global route
 	global total_distance
 	global total_reward
+	global untraversed_graph
 	Ts = [2, 3, 4]
 	max_depths = [2, 3, 4]
 	route_lengths = [20, 30, 40, 50]
@@ -413,6 +430,7 @@ def test():
 						with open('test_results', 'a') as f:
 							f.write("\n" + str(T) + " " + str(max_depth) + " " + str(route_length) + " " + str(num_nodes) + " " + str(edges_per_node) + "\n")
 						for _ in range(num_tests):
+							untraversed_graph = graph.copy()
 							start = time.time()
 							cfr_player2([base], 2, 4, 1, 1, route_length)
 							end = time.time()
