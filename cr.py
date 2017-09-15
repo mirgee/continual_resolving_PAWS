@@ -31,6 +31,7 @@ def init_random(edges_per_node): # max_depth, T, route_length, num_nodes, edges_
 	# route_length = 40
 
 	global graph
+	global untraversed_graph
 	global dist
 	global sigma1
 	global avg_strat1
@@ -64,6 +65,8 @@ def init_random(edges_per_node): # max_depth, T, route_length, num_nodes, edges_
 			r = random.randint(0, 10)
 			f.write(str(r) + '\n')
 			scores.append(r)
+
+	untraversed_graph = graph.copy()
 
 	nx.draw_networkx(graph, pos=nx.spring_layout(graph))
 	pp.show()
@@ -178,13 +181,22 @@ def cfr_player2(node_history, grid_x, grid_y, p1, p2, rem_dist):
 	global total_reward
 
 	curr_node = node_history[-1]
-	# TODO: Pozor na most + jen ty, ze kterych se lze vratit
-	edges = [edge for edge in graph.edges(curr_node) if (edge[0], edge[1]) not in route or (edge[1], edge[0]) not in route]
+	if len(node_history) > 2:
+		untraversed_graph.remove_edge(node_history[-2], node_history[-1])
+
+	# edges = [edge for edge in graph.edges(curr_node) if (edge[0], edge[1]) not in route or (edge[1], edge[0]) not in route]
+	edges = []
+	for edge in untraversed_graph.edges(curr_node):
+		next_node = edge[0] if edge[1] == curr_node else edge[1]
+		# can_return = dist[next_node][base] < rem_dist - dist[curr_node][next_node]
+		can_return = nx.shortest_path_length(untraversed_graph, next_node, base, 'distance') < rem_dist - nx.shortest_path_length(graph, curr_node, next_node, 'distance')
+		if ((edge[0], edge[1]) not in route or (edge[1], edge[0]) not in route) and can_return:
+			edges.append(edge)
+
 
 	# rem_dist <= dist.iloc[int(curr_node), int(base)]
-	# TODO: Lze predpocitat
-	if rem_dist <= nx.shortest_path_length(graph, int(curr_node), int(base)) or (len(node_history) > 1 and int(curr_node) == int(base)) \
-			or len(edges) == 0:
+	if rem_dist <= dist[curr_node][base] or (len(node_history) > 1 and curr_node == base):
+			# or len(edges) == 0:
 		return compute_value_from_route(node_history, grid_x, grid_y)
 
 	sigma2, subtree_nodes = get_empty_dict2_eff(curr_node)
@@ -210,12 +222,18 @@ def cfr_player2(node_history, grid_x, grid_y, p1, p2, rem_dist):
 
 def values(node_history, sigma2, vals, grid_x, grid_y, p1, p2, d, rem_dist, subtree_visited):
 	curr_node = node_history[-1]
-	edges = graph.edges(curr_node)
-	edges = [edge for edge in edges if (edge[0], edge[1]) not in route+subtree_visited or (edge[1], edge[0]) not in route+subtree_visited]
+	# edges = [edge for edge in graph.edges(curr_node) if (edge[0], edge[1]) not in route+subtree_visited or (edge[1], edge[0]) not in route+subtree_visited]
+
+	edges = []
+	for edge in graph.edges(curr_node):
+		next_node = edge[0] if edge[1] == curr_node else edge[1]
+		can_return = dist[next_node][base] < rem_dist - dist[curr_node][next_node]
+		if ((edge[0], edge[1]) not in route+subtree_visited or (edge[1], edge[0]) not in route+subtree_visited) and can_return:
+			edges.append(edge)
 
 	# rem_dist <= dist.iloc[int(curr_node), int(base)]
-	if rem_dist <= nx.shortest_path_length(graph, int(curr_node), int(base)) or (len(node_history) > 1 and int(curr_node) == int(base)) \
-			or len(edges) == 0:
+	if rem_dist <= dist[curr_node][base] or (len(node_history) > 1 and curr_node == base):
+			#or len(edges) == 0:
 		vals[(node_history[-2], node_history[-1])] = compute_value_from_route(node_history, grid_x, grid_y)
 		return vals
 
