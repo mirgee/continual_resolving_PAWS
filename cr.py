@@ -12,7 +12,6 @@ from collections import deque
 import time
 from lib import op, monitor
 from mpi4py import MPI
-import sys
 
 
 def init_random(edges_per_node): # max_depth, T, route_length, num_nodes, edges_per_node):
@@ -53,18 +52,20 @@ def init_random(edges_per_node): # max_depth, T, route_length, num_nodes, edges_
 		graph.edge[u][v]['animal_density'] = random.randint(0, 20)
 		graph.edge[u][v]['grid_cell_x'] = random.randint(0, grid_dim_x-1)
 		graph.edge[u][v]['grid_cell_y'] = random.randint(0, grid_dim_y-1)
-	dist = nx.floyd_warshall_numpy(graph, weight='distance').tolist()
-	scores = []
-	with open('dist_rand.gop', 'w') as f:
-		f.write(str(num_nodes) + " 1 " + str(int(base)) + " " + str(int(base)) + "\n")
-	with open('dist_rand.gop', 'ab') as f:
-		for line in np.matrix(dist):
-			np.savetxt(f, line, fmt='%.2f')
-	with open('dist_rand.gop', 'a') as f:
-		for _ in range(num_nodes):
-			r = random.randint(0, 10)
-			f.write(str(r) + '\n')
-			scores.append(r)
+	# dist = nx.floyd_warshall_numpy(graph, weight='distance').tolist()
+	# scores = []
+	# with open('dist_rand.gop', 'w') as f:
+	# 	f.write(str(num_nodes) + " 1 " + str(int(base)) + " " + str(int(base)) + "\n")
+	# with open('dist_rand.gop', 'ab') as f:
+	# 	for line in np.matrix(dist):
+	# 		np.savetxt(f, line, fmt='%.2f')
+	# with open('dist_rand.gop', 'a') as f:
+	# 	for _ in range(num_nodes):
+	# 		r = random.randint(0, 10)
+	# 		f.write(str(r) + '\n')
+	# 		scores.append(r)
+
+	graph, dist, scores = create_extended_graph(graph)
 
 	untraversed_graph = graph.copy()
 
@@ -184,23 +185,20 @@ def cfr_player2(node_history, grid_x, grid_y, p1, p2, rem_dist):
 	if len(node_history) > 2:
 		untraversed_graph.remove_edge(node_history[-2], node_history[-1])
 
-	# edges = [edge for edge in graph.edges(curr_node) if (edge[0], edge[1]) not in route or (edge[1], edge[0]) not in route]
 	edges = []
 	for edge in untraversed_graph.edges(curr_node):
 		next_node = edge[0] if edge[1] == curr_node else edge[1]
-		tmp = untraversed_graph.copy()
-		tmp.remove_edge(curr_node, next_node)
-		# can_return = dist[next_node][base] < rem_dist - dist[curr_node][next_node]
-		can_return = nx.shortest_path_length(tmp, next_node, base, 'distance') < rem_dist - \
-		                            graph[curr_node][next_node]['distance']
-									# nx.shortest_path_length(untraversed_graph, curr_node, next_node, 'distance')
-		if ((edge[0], edge[1]) not in route or (edge[1], edge[0]) not in route) and can_return:
-			edges.append(edge)
+		edge_data = untraversed_graph[curr_node][next_node]
+		untraversed_graph.remove_edge(curr_node, next_node)
+		try:
+			if nx.shortest_path_length(untraversed_graph, next_node, base, 'distance') < rem_dist - edge_data['distance']:
+				edges.append(edge)
+		except:
+			pass
+		untraversed_graph.add_edge(curr_node, next_node, attr_dict=edge_data)
 
-	# rem_dist <= dist.iloc[int(curr_node), int(base)]
 	# if rem_dist <= nx.shortest_path_length(untraversed_graph, curr_node, base, 'distance')
 	if len(node_history) > 1 and curr_node == base:
-			# or len(edges) == 0:
 		return compute_value_from_route(node_history, grid_x, grid_y)
 
 	if len(edges) == 0:
@@ -208,17 +206,16 @@ def cfr_player2(node_history, grid_x, grid_y, p1, p2, rem_dist):
 		pp.show()
 		nx.draw_networkx(untraversed_graph, pos=nx.spring_layout(untraversed_graph))
 		pp.show()
-		raise Exception("THSI SHOULDNT HAPPEN")
+		raise Exception("THIS SHOULDN'T HAPPEN")
 
 	sigma2, subtree_nodes = get_empty_dict2_eff(curr_node)
 	regret2 = copy.deepcopy(sigma2)
 	avg_strat2 = {edge: 0 for edge in edges}
 	vals = copy.deepcopy(sigma2)
 
-	local_untraversed_graph = untraversed_graph.copy()
 
 	for _ in range(T):
-		vals = values(node_history, sigma2, vals, grid_x, grid_y, p1, p2, 0, rem_dist, [], local_untraversed_graph)
+		vals = values(node_history, sigma2, vals, grid_x, grid_y, p1, p2, 0, rem_dist, [])
 		regret2, sigma2, avg_strat2 = regret_matching2(sigma2, vals, regret2, avg_strat2, subtree_nodes)
 
 	next_edge = max(avg_strat2.items(), key=operator.itemgetter(1))[0]
@@ -227,29 +224,32 @@ def cfr_player2(node_history, grid_x, grid_y, p1, p2, rem_dist):
 
 	route.append(next_edge)
 	total_distance += graph[next_edge[0]][next_edge[1]]['distance']
-	total_reward += graph[next_edge[0]][next_edge[1]]['animal_density']
+	# total_reward += graph[next_edge[0]][next_edge[1]]['animal_density']
+	total_reward += graph.node[next_edge[1]]['animal_density']
 
 	return cfr_player2(node_history + [next_edge[1]], grid_x, grid_y, p1, avg_strat2[next_edge] * p2,
 	                   rem_dist - graph[next_edge[0]][next_edge[1]]['distance'])
 
 
-def values(node_history, sigma2, vals, grid_x, grid_y, p1, p2, d, rem_dist, subtree_visited, local_untraversed_graph):
+def values(node_history, sigma2, vals, grid_x, grid_y, p1, p2, d, rem_dist, subtree_visited):
 	curr_node = node_history[-1]
-	# edges = [edge for edge in graph.edges(curr_node) if (edge[0], edge[1]) not in route+subtree_visited or (edge[1], edge[0]) not in route+subtree_visited]
+
+	local_untraversed_graph = untraversed_graph.copy()
+	local_untraversed_graph.remove_edges_from(subtree_visited)
 
 	edges = []
 	for edge in local_untraversed_graph.edges(curr_node):
 		next_node = edge[0] if edge[1] == curr_node else edge[1]
-		# can_return = dist[next_node][base] < rem_dist - dist[curr_node][next_node]
-		can_return = nx.shortest_path_length(local_untraversed_graph, next_node, base, 'distance') < rem_dist - \
-								nx.shortest_path_length(local_untraversed_graph, curr_node, next_node, 'distance')
-		if ((edge[0], edge[1]) not in route+subtree_visited or (edge[1], edge[0]) not in route+subtree_visited) and can_return:
-			edges.append(edge)
+		edge_data = local_untraversed_graph[curr_node][next_node]
+		local_untraversed_graph.remove_edge(curr_node, next_node)
+		try:
+			if nx.shortest_path_length(local_untraversed_graph, next_node, base, 'distance') < rem_dist - edge_data['distance']:
+				edges.append(edge)
+		except:
+			pass
+		local_untraversed_graph.add_edge(curr_node, next_node, attr_dict=edge_data)
 
-	# rem_dist <= dist.iloc[int(curr_node), int(base)]
-	# if rem_dist <= dist[curr_node][base] or
 	if len(node_history) > 1 and curr_node == base:
-			#or len(edges) == 0:
 		vals[(node_history[-2], node_history[-1])] = compute_value_from_route(node_history, grid_x, grid_y)
 		return vals
 
@@ -257,10 +257,13 @@ def values(node_history, sigma2, vals, grid_x, grid_y, p1, p2, d, rem_dist, subt
 		vals[(node_history[-2], node_history[-1])] = heuristic(node_history[-1], grid_x, grid_y, rem_dist)
 		return vals
 
+	if len(edges) == 0:
+		raise Exception("THIS SHOULDN'T HAPPEN")
+
 	for edge_index, edge in enumerate(edges):
 		edge_data = graph[edge[0]][edge[1]]
 		vals = values(node_history + [edge[1]], sigma2, vals, grid_x, grid_y, p1,
-						sigma2[edge] * p2, d+1, rem_dist - edge_data['distance'], subtree_visited+[edge], local_untraversed_graph)
+						sigma2[edge] * p2, d+1, rem_dist - edge_data['distance'], subtree_visited+[edge])
 
 	return vals
 
@@ -272,9 +275,11 @@ def compute_value_from_route(route, grid_x, grid_y):
 			edge_data = graph[route[index]][route[index+1]]
 			# If we wanted distr. over cells as input, just multiply here by prob. of attack
 			if edge_data['grid_cell_x'] == grid_x and edge_data['grid_cell_y'] == grid_y:
-				value += edge_data['animal_density']
+				# value += edge_data['animal_density']
+				value += graph.node[node]['animal_density']
 			else:
-				value -= edge_data['animal_density']
+				# value -= edge_data['animal_density']
+				value -= graph.node[node]['animal_density']
 	return value
 
 
@@ -402,6 +407,32 @@ def heuristic(curr_node, grid_x, grid_y, rem_dist):
 	return int(solution.get_score())
 
 
+def create_extended_graph(orig_graph):
+	new_graph = nx.Graph()
+	scores = []
+	i = len(orig_graph.nodes())
+	for edge in orig_graph.edges():
+		new_graph.add_node(edge[0], animal_density=0, grid_cell_x=orig_graph[edge[0]][edge[1]]['grid_cell_x'],
+		                   grid_cell_y=orig_graph[edge[0]][edge[1]]['grid_cell_y'])
+		new_graph.add_node(edge[1], animal_density=0, grid_cell_x=orig_graph[edge[0]][edge[1]]['grid_cell_x'],
+		                   grid_cell_y=orig_graph[edge[0]][edge[1]]['grid_cell_y'])
+		new_graph.add_node(i, animal_density=orig_graph[edge[0]][edge[1]]['animal_density'],
+		                   grid_cell_x=orig_graph[edge[0]][edge[1]]['grid_cell_x'],
+		                   grid_cell_y=orig_graph[edge[0]][edge[1]]['grid_cell_y'])
+		new_graph.add_edge(edge[0], i, distance=orig_graph[edge[0]][edge[1]]['distance'] / 2,
+		                   grid_cell_x=orig_graph[edge[0]][edge[1]]['grid_cell_x'],
+		                   grid_cell_y=orig_graph[edge[0]][edge[1]]['grid_cell_y'])
+		new_graph.add_edge(i, edge[1], distance=orig_graph[edge[0]][edge[1]]['distance'] / 2,
+		                   grid_cell_x=orig_graph[edge[0]][edge[1]]['grid_cell_x'],
+		                   grid_cell_y=orig_graph[edge[0]][edge[1]]['grid_cell_y'])
+		i += 1
+	for node_num, node_data in new_graph.nodes(data=True):
+		scores.append(node_data['animal_density'])
+
+	dist = nx.floyd_warshall_numpy(new_graph, weight='distance').tolist()
+	return new_graph, dist, scores
+
+
 def test():
 	global max_depth
 	global T
@@ -433,6 +464,7 @@ def test():
 							untraversed_graph = graph.copy()
 							start = time.time()
 							cfr_player2([base], 2, 4, 1, 1, route_length)
+							# cfr_player1()
 							end = time.time()
 							with open('test_results', 'a') as f:
 								f.write(str(end-start) + '\n')
